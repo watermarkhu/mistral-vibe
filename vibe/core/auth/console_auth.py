@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-import webbrowser
 
 from vibe.core.logger import logger
 
@@ -114,12 +113,6 @@ def get_api_base_for_domain(
                 return str(base)
 
     return None
-
-
-def open_console_login(console_domain: str) -> None:
-    """Open the enterprise console in the user's browser for SSO login."""
-    url = f"https://{console_domain}"
-    webbrowser.open(url)
 
 
 def has_extension_config(config_path: Path | None = None) -> bool:
