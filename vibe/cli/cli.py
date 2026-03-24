@@ -11,12 +11,18 @@ from vibe import __version__
 from vibe.cli.textual_ui.app import StartupOptions, run_textual_ui
 from vibe.core.agent_loop import AgentLoop
 from vibe.core.agents.models import BuiltinAgentName
+from vibe.core.auth.console_auth import (
+    get_api_key_for_domain,
+    has_extension_config,
+    open_console_login,
+)
 from vibe.core.config import (
     MissingAPIKeyError,
     MissingPromptFileError,
     VibeConfig,
     load_dotenv_values,
 )
+from vibe.core.config._settings import ProviderConfig
 from vibe.core.config.harness_files import get_harness_files_manager
 from vibe.core.logger import logger
 from vibe.core.paths import HISTORY_FILE
@@ -81,6 +87,107 @@ def bootstrap_config_files() -> None:
             history_file.write_text("Hello Vibe!\n", "utf-8")
         except Exception as e:
             rprint(f"[yellow]Could not create history file: {e}[/]")
+
+
+def _find_console_provider(config: VibeConfig, provider_name: str) -> ProviderConfig:
+    """Locate a console-auth provider by name, or fall back to the active model's provider."""
+    if provider_name:
+        for p in config.providers:
+            if p.name == provider_name:
+                if not p.uses_console_auth:
+                    rprint(
+                        f"[red]Provider '{provider_name}' does not have console_domain configured.[/]"
+                    )
+                    sys.exit(1)
+                return p
+        rprint(f"[red]Provider '{provider_name}' not found in configuration.[/]")
+        sys.exit(1)
+
+    active_model = config.get_active_model()
+    provider = config.get_provider_for_model(active_model)
+    if not provider.uses_console_auth:
+        rprint(
+            f"[red]Active provider '{provider.name}' does not use console auth.\n"
+            f"Specify a provider name: vibe --login <provider>[/]"
+        )
+        sys.exit(1)
+    return provider
+
+
+def run_console_login(config: VibeConfig, provider_name: str) -> None:
+    """Open the enterprise Mistral console in the browser for SSO login."""
+    provider = _find_console_provider(config, provider_name)
+    domain = provider.console_domain
+
+    config_path = provider.resolved_console_config_path
+    if not has_extension_config(config_path):
+        rprint(
+            "[yellow]The Mistral Code VSCode extension config was not found at "
+            "~/.mistralcode/config.json.[/]\n"
+            "[dim]Install and log into the mistralai.mistral-code extension first, "
+            "then run vibe again.[/]"
+        )
+        sys.exit(1)
+
+    key = get_api_key_for_domain(domain, config_path=config_path)
+    if key:
+        rprint(
+            f"[green]Already authenticated with '{provider.name}' "
+            f"(key from VSCode extension).[/]"
+        )
+        return
+
+    rprint(
+        f"[yellow]No valid key found for '{provider.name}'.\n"
+        f"Opening the Mistral console in your browser for SSO login…[/]\n"
+        f"[dim]After logging in, the Mistral Code extension will receive a "
+        f"fresh API key.\nThen run vibe again.[/]"
+    )
+    open_console_login(domain)
+
+
+def run_console_logout(config: VibeConfig, provider_name: str) -> None:
+    """Inform the user that logout requires the extension/console."""
+    provider = _find_console_provider(config, provider_name)
+    rprint(
+        f"[yellow]Console auth tokens for '{provider.name}' are managed by the "
+        f"Mistral Code VSCode extension.\n"
+        f"To log out, use the extension's sign-out command or clear "
+        f"~/.mistralcode/config.json.[/]"
+    )
+
+
+def ensure_console_login(config: VibeConfig) -> None:
+    """If the active provider uses console auth and no key is available, help the user."""
+    try:
+        active_model = config.get_active_model()
+        provider = config.get_provider_for_model(active_model)
+    except ValueError:
+        return
+    if not provider.uses_console_auth:
+        return
+
+    config_path = provider.resolved_console_config_path
+    key = get_api_key_for_domain(provider.console_domain, config_path=config_path)
+    if key:
+        return
+
+    if not has_extension_config(config_path):
+        rprint(
+            f"[red]Provider '{provider.name}' requires the Mistral Code VSCode "
+            f"extension to be installed and logged in.[/]\n"
+            f"[dim]Install the mistralai.mistral-code extension, log in, then "
+            f"run vibe again.[/]"
+        )
+        sys.exit(1)
+
+    rprint(
+        f"[yellow]No API key found for '{provider.name}'. "
+        f"The key in the Mistral Code extension may have expired.[/]\n"
+        f"[dim]Open the extension or visit https://{provider.console_domain} "
+        f"to refresh your session, then run vibe again.[/]"
+    )
+    sys.exit(1)
 
 
 def load_session(
@@ -150,9 +257,20 @@ def run_cli(args: argparse.Namespace) -> None:
         run_onboarding()
         sys.exit(0)
 
+    if args.login is not None:
+        config = load_config_or_exit()
+        run_console_login(config, args.login)
+        sys.exit(0)
+
+    if args.logout is not None:
+        config = load_config_or_exit()
+        run_console_logout(config, args.logout)
+        sys.exit(0)
+
     try:
         initial_agent_name = get_initial_agent_name(args)
         config = load_config_or_exit()
+        ensure_console_login(config)
         setup_tracing(config)
 
         if args.enabled_tools:

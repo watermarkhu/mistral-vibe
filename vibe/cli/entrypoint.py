@@ -78,6 +78,21 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument("--setup", action="store_true", help="Setup API key and exit")
     parser.add_argument(
+        "--login",
+        nargs="?",
+        const="",
+        metavar="PROVIDER",
+        help="Check login status for an enterprise provider. "
+        "Opens the console in the browser if re-authentication is needed.",
+    )
+    parser.add_argument(
+        "--logout",
+        nargs="?",
+        const="",
+        metavar="PROVIDER",
+        help="Show instructions to remove stored tokens for an enterprise provider.",
+    )
+    parser.add_argument(
         "--workdir",
         type=Path,
         metavar="DIR",

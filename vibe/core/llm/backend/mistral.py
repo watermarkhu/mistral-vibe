@@ -174,11 +174,7 @@ class MistralBackend:
         self._client: Mistral | None = None
         self._provider = provider
         self._mapper = MistralMapper()
-        self._api_key = (
-            os.getenv(self._provider.api_key_env_var)
-            if self._provider.api_key_env_var
-            else None
-        )
+        self._api_key = self._resolve_initial_api_key()
 
         reasoning_field = getattr(provider, "reasoning_field_name", "reasoning_content")
         if reasoning_field != "reasoning_content":
@@ -211,6 +207,13 @@ class MistralBackend:
         )
 
     async def __aenter__(self) -> MistralBackend:
+        # Refresh console key before creating client (it's a file read, but
+        # keeps the pattern consistent with other async backends)
+        if self._provider.uses_console_auth:
+            from vibe.core.auth.token_resolver import resolve_api_key
+
+            if token := await resolve_api_key(self._provider):
+                self._api_key = token
         self._client = self._create_mistral_client()
         await self._client.__aenter__()
         return self
@@ -238,6 +241,16 @@ class MistralBackend:
         if self._client is None:
             self._client = self._create_mistral_client()
         return self._client
+
+    def _resolve_initial_api_key(self) -> str | None:
+        """Resolve the API key at init time (sync)."""
+        if self._provider.uses_console_auth:
+            from vibe.core.auth.token_resolver import resolve_api_key_sync
+
+            return resolve_api_key_sync(self._provider)
+        if self._provider.api_key_env_var:
+            return os.getenv(self._provider.api_key_env_var)
+        return None
 
     async def complete(
         self,

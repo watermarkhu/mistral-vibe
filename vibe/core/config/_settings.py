@@ -127,6 +127,19 @@ class ProviderConfig(BaseModel):
     reasoning_field_name: str = "reasoning_content"
     project_id: str = ""
     region: str = ""
+    console_domain: str = ""
+    console_config_path: str = ""
+
+    @property
+    def uses_console_auth(self) -> bool:
+        return bool(self.console_domain)
+
+    @property
+    def resolved_console_config_path(self) -> Path | None:
+        """Return the extension config path, or None to use the default."""
+        if self.console_config_path:
+            return Path(self.console_config_path).expanduser()
+        return None
 
 
 class TranscribeClient(StrEnum):
@@ -689,6 +702,9 @@ class VibeConfig(BaseSettings):
         try:
             active_model = self.get_active_model()
             provider = self.get_provider_for_model(active_model)
+            # Console-auth providers get their key from the VSCode extension
+            if provider.uses_console_auth:
+                return self
             api_key_env = provider.api_key_env_var
             if api_key_env and not os.getenv(api_key_env):
                 raise MissingAPIKeyError(api_key_env, provider.name)

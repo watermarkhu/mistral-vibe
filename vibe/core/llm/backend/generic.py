@@ -209,6 +209,15 @@ class GenericBackend:
             self._owns_client = True
         return self._client
 
+    async def _resolve_api_key(self) -> str | None:
+        if self._provider.uses_console_auth:
+            from vibe.core.auth.token_resolver import resolve_api_key
+
+            return await resolve_api_key(self._provider)
+        if self._provider.api_key_env_var:
+            return os.getenv(self._provider.api_key_env_var)
+        return None
+
     async def complete(
         self,
         *,
@@ -221,11 +230,7 @@ class GenericBackend:
         extra_headers: dict[str, str] | None = None,
         metadata: dict[str, str] | None = None,
     ) -> LLMChunk:
-        api_key = (
-            os.getenv(self._provider.api_key_env_var)
-            if self._provider.api_key_env_var
-            else None
-        )
+        api_key = await self._resolve_api_key()
 
         api_style = getattr(self._provider, "api_style", "openai")
         adapter = ADAPTERS[api_style]
@@ -290,11 +295,7 @@ class GenericBackend:
         extra_headers: dict[str, str] | None = None,
         metadata: dict[str, str] | None = None,
     ) -> AsyncGenerator[LLMChunk, None]:
-        api_key = (
-            os.getenv(self._provider.api_key_env_var)
-            if self._provider.api_key_env_var
-            else None
-        )
+        api_key = await self._resolve_api_key()
 
         api_style = getattr(self._provider, "api_style", "openai")
         adapter = ADAPTERS[api_style]
